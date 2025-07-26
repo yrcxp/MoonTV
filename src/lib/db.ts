@@ -4,13 +4,15 @@ import { AdminConfig } from './admin.types';
 import { D1Storage } from './d1.db';
 import { RedisStorage } from './redis.db';
 import { Favorite, IStorage, PlayRecord } from './types';
+import { UpstashRedisStorage } from './upstash.db';
 
-// storage type 常量: 'localstorage' | 'redis' | 'd1'，默认 'localstorage'
+// storage type 常量: 'localstorage' | 'redis' | 'd1' | 'upstash'，默认 'localstorage'
 const STORAGE_TYPE =
   (process.env.NEXT_PUBLIC_STORAGE_TYPE as
     | 'localstorage'
     | 'redis'
     | 'd1'
+    | 'upstash'
     | undefined) || 'localstorage';
 
 // 创建存储实例
@@ -18,6 +20,8 @@ function createStorage(): IStorage {
   switch (STORAGE_TYPE) {
     case 'redis':
       return new RedisStorage();
+    case 'upstash':
+      return new UpstashRedisStorage();
     case 'd1':
       return new D1Storage();
     case 'localstorage':
@@ -127,27 +131,6 @@ export class DbManager {
   ): Promise<boolean> {
     const favorite = await this.getFavorite(userName, source, id);
     return favorite !== null;
-  }
-
-  async toggleFavorite(
-    userName: string,
-    source: string,
-    id: string,
-    favoriteData?: Favorite
-  ): Promise<boolean> {
-    const isFav = await this.isFavorited(userName, source, id);
-
-    if (isFav) {
-      await this.deleteFavorite(userName, source, id);
-      return false;
-    }
-
-    if (favoriteData) {
-      await this.saveFavorite(userName, source, id, favoriteData);
-      return true;
-    }
-
-    throw new Error('Favorite data is required when adding to favorites');
   }
 
   // ---------- 用户相关 ----------

@@ -49,8 +49,6 @@ async function initConfig() {
   }
 
   if (process.env.DOCKER_ENV === 'true') {
-    // 这里用 eval("require") 避开静态分析，防止 Edge Runtime 打包时报 "Can't resolve 'fs'"
-    // 在实际 Node.js 运行时才会执行到，因此不会影响 Edge 环境。
     // eslint-disable-next-line @typescript-eslint/no-implied-eval
     const _require = eval('require') as NodeRequire;
     const fs = _require('fs') as typeof import('fs');
@@ -160,6 +158,8 @@ async function initConfig() {
             SearchDownstreamMaxPage:
               Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
             SiteInterfaceCacheTime: fileConfig.cache_time || 7200,
+            ImageProxy: process.env.NEXT_PUBLIC_IMAGE_PROXY || '',
+            DoubanProxy: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
           },
           UserConfig: {
             AllowRegister: process.env.NEXT_PUBLIC_ENABLE_REGISTER === 'true',
@@ -197,6 +197,8 @@ async function initConfig() {
         SearchDownstreamMaxPage:
           Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
         SiteInterfaceCacheTime: fileConfig.cache_time || 7200,
+        ImageProxy: process.env.NEXT_PUBLIC_IMAGE_PROXY || '',
+        DoubanProxy: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
       },
       UserConfig: {
         AllowRegister: process.env.NEXT_PUBLIC_ENABLE_REGISTER === 'true',
@@ -234,6 +236,56 @@ export async function getConfig(): Promise<AdminConfig> {
       '本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。';
     adminConfig.UserConfig.AllowRegister =
       process.env.NEXT_PUBLIC_ENABLE_REGISTER === 'true';
+    adminConfig.SiteConfig.ImageProxy =
+      process.env.NEXT_PUBLIC_IMAGE_PROXY || '';
+    adminConfig.SiteConfig.DoubanProxy =
+      process.env.NEXT_PUBLIC_DOUBAN_PROXY || '';
+
+    // 合并文件中的源信息
+    fileConfig = runtimeConfig as unknown as ConfigFileStruct;
+    const apiSiteEntries = Object.entries(fileConfig.api_site);
+    const existed = new Set((adminConfig.SourceConfig || []).map((s) => s.key));
+    apiSiteEntries.forEach(([key, site]) => {
+      if (!existed.has(key)) {
+        adminConfig!.SourceConfig.push({
+          key,
+          name: site.name,
+          api: site.api,
+          detail: site.detail,
+          from: 'config',
+          disabled: false,
+        });
+      }
+    });
+
+    // 检查现有源是否在 fileConfig.api_site 中，如果不在则标记为 custom
+    const apiSiteKeys = new Set(apiSiteEntries.map(([key]) => key));
+    adminConfig.SourceConfig.forEach((source) => {
+      if (!apiSiteKeys.has(source.key)) {
+        source.from = 'custom';
+      }
+    });
+
+    const ownerUser = process.env.USERNAME || '';
+    // 检查配置中的站长用户是否和 USERNAME 匹配，如果不匹配则降级为普通用户
+    let containOwner = false;
+    adminConfig.UserConfig.Users.forEach((user) => {
+      if (user.username !== ownerUser && user.role === 'owner') {
+        user.role = 'user';
+      }
+      if (user.username === ownerUser) {
+        containOwner = true;
+        user.role = 'owner';
+      }
+    });
+
+    // 如果不在则添加
+    if (!containOwner) {
+      adminConfig.UserConfig.Users.unshift({
+        username: ownerUser,
+        role: 'owner',
+      });
+    }
     cachedConfig = adminConfig;
   } else {
     // DB 无配置，执行一次初始化
@@ -252,6 +304,21 @@ export async function resetConfig() {
     } catch (e) {
       console.error('获取用户列表失败:', e);
     }
+  }
+
+  if (process.env.DOCKER_ENV === 'true') {
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    const _require = eval('require') as NodeRequire;
+    const fs = _require('fs') as typeof import('fs');
+    const path = _require('path') as typeof import('path');
+
+    const configPath = path.join(process.cwd(), 'config.json');
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    fileConfig = JSON.parse(raw) as ConfigFileStruct;
+    console.log('load dynamic config success');
+  } else {
+    // 默认使用编译时生成的配置
+    fileConfig = runtimeConfig as unknown as ConfigFileStruct;
   }
 
   // 从文件中获取源信息，用于补全源
@@ -277,6 +344,8 @@ export async function resetConfig() {
       SearchDownstreamMaxPage:
         Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
       SiteInterfaceCacheTime: fileConfig.cache_time || 7200,
+      ImageProxy: process.env.NEXT_PUBLIC_IMAGE_PROXY || '',
+      DoubanProxy: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
     },
     UserConfig: {
       AllowRegister: process.env.NEXT_PUBLIC_ENABLE_REGISTER === 'true',
@@ -295,7 +364,10 @@ export async function resetConfig() {
   if (storage && typeof (storage as any).setAdminConfig === 'function') {
     await (storage as any).setAdminConfig(adminConfig);
   }
-
+  if (cachedConfig == null) {
+    // serverless 环境，直接使用 adminConfig
+    cachedConfig = adminConfig;
+  }
   cachedConfig.SiteConfig = adminConfig.SiteConfig;
   cachedConfig.UserConfig = adminConfig.UserConfig;
   cachedConfig.SourceConfig = adminConfig.SourceConfig;
