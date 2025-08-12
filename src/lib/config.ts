@@ -17,6 +17,11 @@ interface ConfigFileStruct {
   api_site: {
     [key: string]: ApiSite;
   };
+  custom_category?: {
+    name?: string;
+    type: 'movie' | 'tv';
+    query: string;
+  }[];
 }
 
 export const API_CONFIG = {
@@ -49,8 +54,6 @@ async function initConfig() {
   }
 
   if (process.env.DOCKER_ENV === 'true') {
-    // 这里用 eval("require") 避开静态分析，防止 Edge Runtime 打包时报 "Can't resolve 'fs'"
-    // 在实际 Node.js 运行时才会执行到，因此不会影响 Edge 环境。
     // eslint-disable-next-line @typescript-eslint/no-implied-eval
     const _require = eval('require') as NodeRequire;
     const fs = _require('fs') as typeof import('fs');
@@ -88,24 +91,27 @@ async function initConfig() {
 
       // 从文件中获取源信息，用于补全源
       const apiSiteEntries = Object.entries(fileConfig.api_site);
+      const customCategories = fileConfig.custom_category || [];
 
       if (adminConfig) {
         // 补全 SourceConfig
-        const existed = new Set(
-          (adminConfig.SourceConfig || []).map((s) => s.key)
+        const sourceConfigMap = new Map(
+          (adminConfig.SourceConfig || []).map((s) => [s.key, s])
         );
+
         apiSiteEntries.forEach(([key, site]) => {
-          if (!existed.has(key)) {
-            adminConfig!.SourceConfig.push({
-              key,
-              name: site.name,
-              api: site.api,
-              detail: site.detail,
-              from: 'config',
-              disabled: false,
-            });
-          }
+          sourceConfigMap.set(key, {
+            key,
+            name: site.name,
+            api: site.api,
+            detail: site.detail,
+            from: 'config',
+            disabled: false,
+          });
         });
+
+        // 将 Map 转换回数组
+        adminConfig.SourceConfig = Array.from(sourceConfigMap.values());
 
         // 检查现有源是否在 fileConfig.api_site 中，如果不在则标记为 custom
         const apiSiteKeys = new Set(apiSiteEntries.map(([key]) => key));
@@ -114,6 +120,39 @@ async function initConfig() {
             source.from = 'custom';
           }
         });
+
+        // 确保 CustomCategories 被初始化
+        if (!adminConfig.CustomCategories) {
+          adminConfig.CustomCategories = [];
+        }
+
+        // 补全 CustomCategories
+        const customCategoriesMap = new Map(
+          adminConfig.CustomCategories.map((c) => [c.query + c.type, c])
+        );
+
+        customCategories.forEach((category) => {
+          customCategoriesMap.set(category.query + category.type, {
+            name: category.name,
+            type: category.type,
+            query: category.query,
+            from: 'config',
+            disabled: false,
+          });
+        });
+
+        // 检查现有 CustomCategories 是否在 fileConfig.custom_category 中，如果不在则标记为 custom
+        const customCategoriesKeys = new Set(
+          customCategories.map((c) => c.query + c.type)
+        );
+        customCategoriesMap.forEach((category) => {
+          if (!customCategoriesKeys.has(category.query + category.type)) {
+            category.from = 'custom';
+          }
+        });
+
+        // 将 Map 转换回数组
+        adminConfig.CustomCategories = Array.from(customCategoriesMap.values());
 
         const existedUsers = new Set(
           (adminConfig.UserConfig.Users || []).map((u) => u.username)
@@ -153,13 +192,21 @@ async function initConfig() {
         }
         adminConfig = {
           SiteConfig: {
-            SiteName: process.env.SITE_NAME || 'MoonTV',
+            SiteName: process.env.NEXT_PUBLIC_SITE_NAME || 'MoonTV',
             Announcement:
               process.env.ANNOUNCEMENT ||
               '本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。',
             SearchDownstreamMaxPage:
               Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
             SiteInterfaceCacheTime: fileConfig.cache_time || 7200,
+            DoubanProxyType:
+              process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'direct',
+            DoubanProxy: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
+            DoubanImageProxyType:
+              process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE || 'direct',
+            DoubanImageProxy: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
+            DisableYellowFilter:
+              process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true',
           },
           UserConfig: {
             AllowRegister: process.env.NEXT_PUBLIC_ENABLE_REGISTER === 'true',
@@ -170,6 +217,13 @@ async function initConfig() {
             name: site.name,
             api: site.api,
             detail: site.detail,
+            from: 'config',
+            disabled: false,
+          })),
+          CustomCategories: customCategories.map((category) => ({
+            name: category.name,
+            type: category.type,
+            query: category.query,
             from: 'config',
             disabled: false,
           })),
@@ -190,13 +244,20 @@ async function initConfig() {
     // 本地存储直接使用文件配置
     cachedConfig = {
       SiteConfig: {
-        SiteName: process.env.SITE_NAME || 'MoonTV',
+        SiteName: process.env.NEXT_PUBLIC_SITE_NAME || 'MoonTV',
         Announcement:
           process.env.ANNOUNCEMENT ||
           '本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。',
         SearchDownstreamMaxPage:
           Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
         SiteInterfaceCacheTime: fileConfig.cache_time || 7200,
+        DoubanProxyType: process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'direct',
+        DoubanProxy: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
+        DoubanImageProxyType:
+          process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE || 'direct',
+        DoubanImageProxy: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
+        DisableYellowFilter:
+          process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true',
       },
       UserConfig: {
         AllowRegister: process.env.NEXT_PUBLIC_ENABLE_REGISTER === 'true',
@@ -210,6 +271,14 @@ async function initConfig() {
         from: 'config',
         disabled: false,
       })),
+      CustomCategories:
+        fileConfig.custom_category?.map((category) => ({
+          name: category.name,
+          type: category.type,
+          query: category.query,
+          from: 'config',
+          disabled: false,
+        })) || [],
     } as AdminConfig;
   }
 }
@@ -227,13 +296,99 @@ export async function getConfig(): Promise<AdminConfig> {
     adminConfig = await (storage as any).getAdminConfig();
   }
   if (adminConfig) {
+    // 确保 CustomCategories 被初始化
+    if (!adminConfig.CustomCategories) {
+      adminConfig.CustomCategories = [];
+    }
+
     // 合并一些环境变量配置
-    adminConfig.SiteConfig.SiteName = process.env.SITE_NAME || 'MoonTV';
+    adminConfig.SiteConfig.SiteName =
+      process.env.NEXT_PUBLIC_SITE_NAME || 'MoonTV';
     adminConfig.SiteConfig.Announcement =
       process.env.ANNOUNCEMENT ||
       '本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。';
     adminConfig.UserConfig.AllowRegister =
       process.env.NEXT_PUBLIC_ENABLE_REGISTER === 'true';
+    adminConfig.SiteConfig.DoubanProxyType =
+      process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'direct';
+    adminConfig.SiteConfig.DoubanProxy =
+      process.env.NEXT_PUBLIC_DOUBAN_PROXY || '';
+    adminConfig.SiteConfig.DoubanImageProxyType =
+      process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE || 'direct';
+    adminConfig.SiteConfig.DoubanImageProxy =
+      process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '';
+    adminConfig.SiteConfig.DisableYellowFilter =
+      process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true';
+
+    // 合并文件中的源信息
+    fileConfig = runtimeConfig as unknown as ConfigFileStruct;
+    const apiSiteEntries = Object.entries(fileConfig.api_site);
+    const sourceConfigMap = new Map(
+      (adminConfig.SourceConfig || []).map((s) => [s.key, s])
+    );
+
+    apiSiteEntries.forEach(([key, site]) => {
+      const existingSource = sourceConfigMap.get(key);
+      if (existingSource) {
+        // 如果已存在，只覆盖 name、api、detail 和 from
+        existingSource.name = site.name;
+        existingSource.api = site.api;
+        existingSource.detail = site.detail;
+        existingSource.from = 'config';
+      } else {
+        // 如果不存在，创建新条目
+        sourceConfigMap.set(key, {
+          key,
+          name: site.name,
+          api: site.api,
+          detail: site.detail,
+          from: 'config',
+          disabled: false,
+        });
+      }
+    });
+
+    // 检查现有源是否在 fileConfig.api_site 中，如果不在则标记为 custom
+    const apiSiteKeys = new Set(apiSiteEntries.map(([key]) => key));
+    sourceConfigMap.forEach((source) => {
+      if (!apiSiteKeys.has(source.key)) {
+        source.from = 'custom';
+      }
+    });
+
+    // 将 Map 转换回数组
+    adminConfig.SourceConfig = Array.from(sourceConfigMap.values());
+
+    // 覆盖 CustomCategories
+    const customCategories = fileConfig.custom_category || [];
+    adminConfig.CustomCategories = customCategories.map((category) => ({
+      name: category.name,
+      type: category.type,
+      query: category.query,
+      from: 'config',
+      disabled: false,
+    }));
+
+    const ownerUser = process.env.USERNAME || '';
+    // 检查配置中的站长用户是否和 USERNAME 匹配，如果不匹配则降级为普通用户
+    let containOwner = false;
+    adminConfig.UserConfig.Users.forEach((user) => {
+      if (user.username !== ownerUser && user.role === 'owner') {
+        user.role = 'user';
+      }
+      if (user.username === ownerUser) {
+        containOwner = true;
+        user.role = 'owner';
+      }
+    });
+
+    // 如果不在则添加
+    if (!containOwner) {
+      adminConfig.UserConfig.Users.unshift({
+        username: ownerUser,
+        role: 'owner',
+      });
+    }
     cachedConfig = adminConfig;
   } else {
     // DB 无配置，执行一次初始化
@@ -243,6 +398,7 @@ export async function getConfig(): Promise<AdminConfig> {
 }
 
 export async function resetConfig() {
+  const storageType = process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage';
   const storage = getStorage();
   // 获取所有用户名，用于补全 Users
   let userNames: string[] = [];
@@ -254,8 +410,23 @@ export async function resetConfig() {
     }
   }
 
-  // 从文件中获取源信息，用于补全源
+  if (process.env.DOCKER_ENV === 'true') {
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    const _require = eval('require') as NodeRequire;
+    const fs = _require('fs') as typeof import('fs');
+    const path = _require('path') as typeof import('path');
+
+    const configPath = path.join(process.cwd(), 'config.json');
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    fileConfig = JSON.parse(raw) as ConfigFileStruct;
+    console.log('load dynamic config success');
+  } else {
+    // 默认使用编译时生成的配置
+    fileConfig = runtimeConfig as unknown as ConfigFileStruct;
+  }
+
   const apiSiteEntries = Object.entries(fileConfig.api_site);
+  const customCategories = fileConfig.custom_category || [];
   let allUsers = userNames.map((uname) => ({
     username: uname,
     role: 'user',
@@ -270,13 +441,20 @@ export async function resetConfig() {
   }
   const adminConfig = {
     SiteConfig: {
-      SiteName: process.env.SITE_NAME || 'MoonTV',
+      SiteName: process.env.NEXT_PUBLIC_SITE_NAME || 'MoonTV',
       Announcement:
         process.env.ANNOUNCEMENT ||
         '本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。',
       SearchDownstreamMaxPage:
         Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
       SiteInterfaceCacheTime: fileConfig.cache_time || 7200,
+      DoubanProxyType: process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'direct',
+      DoubanProxy: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
+      DoubanImageProxyType:
+        process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE || 'direct',
+      DoubanImageProxy: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
+      DisableYellowFilter:
+        process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true',
     },
     UserConfig: {
       AllowRegister: process.env.NEXT_PUBLIC_ENABLE_REGISTER === 'true',
@@ -290,15 +468,29 @@ export async function resetConfig() {
       from: 'config',
       disabled: false,
     })),
+    CustomCategories:
+      storageType === 'redis'
+        ? customCategories?.map((category) => ({
+            name: category.name,
+            type: category.type,
+            query: category.query,
+            from: 'config',
+            disabled: false,
+          })) || []
+        : [],
   } as AdminConfig;
 
   if (storage && typeof (storage as any).setAdminConfig === 'function') {
     await (storage as any).setAdminConfig(adminConfig);
   }
-
+  if (cachedConfig == null) {
+    // serverless 环境，直接使用 adminConfig
+    cachedConfig = adminConfig;
+  }
   cachedConfig.SiteConfig = adminConfig.SiteConfig;
   cachedConfig.UserConfig = adminConfig.UserConfig;
   cachedConfig.SourceConfig = adminConfig.SourceConfig;
+  cachedConfig.CustomCategories = adminConfig.CustomCategories;
 }
 
 export async function getCacheTime(): Promise<number> {

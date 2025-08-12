@@ -3,6 +3,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
+import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 import { PlayRecord } from '@/lib/types';
 
@@ -14,6 +15,17 @@ export async function GET(request: NextRequest) {
     const authInfo = getAuthInfoFromCookie(request);
     if (!authInfo || !authInfo.username) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const config = await getConfig();
+    if (config.UserConfig.Users) {
+      // 检查用户是否被封禁
+      const user = config.UserConfig.Users.find(
+        (u) => u.username === authInfo.username
+      );
+      if (user && user.banned) {
+        return NextResponse.json({ error: '用户已被封禁' }, { status: 401 });
+      }
     }
 
     const records = await db.getAllPlayRecords(authInfo.username);
@@ -33,6 +45,17 @@ export async function POST(request: NextRequest) {
     const authInfo = getAuthInfoFromCookie(request);
     if (!authInfo || !authInfo.username) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const config = await getConfig();
+    if (config.UserConfig.Users) {
+      // 检查用户是否被封禁
+      const user = config.UserConfig.Users.find(
+        (u) => u.username === authInfo.username
+      );
+      if (user && user.banned) {
+        return NextResponse.json({ error: '用户已被封禁' }, { status: 401 });
+      }
     }
 
     const body = await request.json();
@@ -62,7 +85,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    await db.savePlayRecord(authInfo.username, source, id, record);
+    const finalRecord = {
+      ...record,
+      save_time: record.save_time ?? Date.now(),
+    } as PlayRecord;
+
+    await db.savePlayRecord(authInfo.username, source, id, finalRecord);
 
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (err) {
@@ -80,6 +108,17 @@ export async function DELETE(request: NextRequest) {
     const authInfo = getAuthInfoFromCookie(request);
     if (!authInfo || !authInfo.username) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const config = await getConfig();
+    if (config.UserConfig.Users) {
+      // 检查用户是否被封禁
+      const user = config.UserConfig.Users.find(
+        (u) => u.username === authInfo.username
+      );
+      if (user && user.banned) {
+        return NextResponse.json({ error: '用户已被封禁' }, { status: 401 });
+      }
     }
 
     const username = authInfo.username;

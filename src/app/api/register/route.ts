@@ -11,7 +11,7 @@ const STORAGE_TYPE =
   (process.env.NEXT_PUBLIC_STORAGE_TYPE as
     | 'localstorage'
     | 'redis'
-    | 'd1'
+    | 'upstash'
     | undefined) || 'localstorage';
 
 // 生成签名
@@ -44,6 +44,7 @@ async function generateSignature(
 // 生成认证Cookie（带签名）
 async function generateAuthCookie(username: string): Promise<string> {
   const authData: any = {
+    role: 'user',
     username,
     timestamp: Date.now(),
   };

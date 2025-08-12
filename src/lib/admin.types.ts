@@ -4,6 +4,11 @@ export interface AdminConfig {
     Announcement: string;
     SearchDownstreamMaxPage: number;
     SiteInterfaceCacheTime: number;
+    DoubanProxyType: string;
+    DoubanProxy: string;
+    DoubanImageProxyType: string;
+    DoubanImageProxy: string;
+    DisableYellowFilter: boolean;
   };
   UserConfig: {
     AllowRegister: boolean;
@@ -18,6 +23,13 @@ export interface AdminConfig {
     name: string;
     api: string;
     detail?: string;
+    from: 'config' | 'custom';
+    disabled?: boolean;
+  }[];
+  CustomCategories: {
+    name?: string;
+    type: 'movie' | 'tv';
+    query: string;
     from: 'config' | 'custom';
     disabled?: boolean;
   }[];

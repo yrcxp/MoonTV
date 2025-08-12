@@ -1,16 +1,16 @@
 /* eslint-disable no-console, @typescript-eslint/no-explicit-any, @typescript-eslint/no-non-null-assertion */
 
 import { AdminConfig } from './admin.types';
-import { D1Storage } from './d1.db';
 import { RedisStorage } from './redis.db';
-import { Favorite, IStorage, PlayRecord } from './types';
+import { Favorite, IStorage, PlayRecord, SkipConfig } from './types';
+import { UpstashRedisStorage } from './upstash.db';
 
-// storage type 常量: 'localstorage' | 'redis' | 'd1'，默认 'localstorage'
+// storage type 常量: 'localstorage' | 'redis' | 'upstash'，默认 'localstorage'
 const STORAGE_TYPE =
   (process.env.NEXT_PUBLIC_STORAGE_TYPE as
     | 'localstorage'
     | 'redis'
-    | 'd1'
+    | 'upstash'
     | undefined) || 'localstorage';
 
 // 创建存储实例
@@ -18,11 +18,10 @@ function createStorage(): IStorage {
   switch (STORAGE_TYPE) {
     case 'redis':
       return new RedisStorage();
-    case 'd1':
-      return new D1Storage();
+    case 'upstash':
+      return new UpstashRedisStorage();
     case 'localstorage':
     default:
-      // 默认返回内存实现，保证本地开发可用
       return null as unknown as IStorage;
   }
 }
@@ -129,27 +128,6 @@ export class DbManager {
     return favorite !== null;
   }
 
-  async toggleFavorite(
-    userName: string,
-    source: string,
-    id: string,
-    favoriteData?: Favorite
-  ): Promise<boolean> {
-    const isFav = await this.isFavorited(userName, source, id);
-
-    if (isFav) {
-      await this.deleteFavorite(userName, source, id);
-      return false;
-    }
-
-    if (favoriteData) {
-      await this.saveFavorite(userName, source, id, favoriteData);
-      return true;
-    }
-
-    throw new Error('Favorite data is required when adding to favorites');
-  }
-
   // ---------- 用户相关 ----------
   async registerUser(userName: string, password: string): Promise<void> {
     await this.storage.registerUser(userName, password);
@@ -197,6 +175,48 @@ export class DbManager {
     if (typeof (this.storage as any).setAdminConfig === 'function') {
       await (this.storage as any).setAdminConfig(config);
     }
+  }
+
+  // ---------- 跳过片头片尾配置 ----------
+  async getSkipConfig(
+    userName: string,
+    source: string,
+    id: string
+  ): Promise<SkipConfig | null> {
+    if (typeof (this.storage as any).getSkipConfig === 'function') {
+      return (this.storage as any).getSkipConfig(userName, source, id);
+    }
+    return null;
+  }
+
+  async setSkipConfig(
+    userName: string,
+    source: string,
+    id: string,
+    config: SkipConfig
+  ): Promise<void> {
+    if (typeof (this.storage as any).setSkipConfig === 'function') {
+      await (this.storage as any).setSkipConfig(userName, source, id, config);
+    }
+  }
+
+  async deleteSkipConfig(
+    userName: string,
+    source: string,
+    id: string
+  ): Promise<void> {
+    if (typeof (this.storage as any).deleteSkipConfig === 'function') {
+      await (this.storage as any).deleteSkipConfig(userName, source, id);
+    }
+  }
+
+  async getAllSkipConfigs(
+    userName: string
+  ): Promise<{ [key: string]: SkipConfig }> {
+    if (typeof (this.storage as any).getAllSkipConfigs === 'function') {
+      return (this.storage as any).getAllSkipConfigs(userName);
+    }
+    return {};
   }
 }
 

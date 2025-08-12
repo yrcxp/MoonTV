@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/exhaustive-deps, @typescript-eslint/no-explicit-any */
 'use client';
 
-import { Search, X } from 'lucide-react';
+import { ChevronUp, Search, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useMemo, useState } from 'react';
 
@@ -13,13 +13,17 @@ import {
   subscribeToDataUpdates,
 } from '@/lib/db.client';
 import { SearchResult } from '@/lib/types';
+import { yellowWords } from '@/lib/yellow';
 
 import PageLayout from '@/components/PageLayout';
+import SearchSuggestions from '@/components/SearchSuggestions';
 import VideoCard from '@/components/VideoCard';
 
 function SearchPageClient() {
   // 搜索历史
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
+  // 返回顶部按钮显示状态
+  const [showBackToTop, setShowBackToTop] = useState(false);
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -27,6 +31,7 @@ function SearchPageClient() {
   const [isLoading, setIsLoading] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   // 获取默认聚合设置：只读取用户本地设置，默认为 true
   const getDefaultAggregate = () => {
@@ -104,7 +109,42 @@ function SearchPageClient() {
       }
     );
 
-    return unsubscribe;
+    // 获取滚动位置的函数 - 专门针对 body 滚动
+    const getScrollTop = () => {
+      return document.body.scrollTop || 0;
+    };
+
+    // 使用 requestAnimationFrame 持续检测滚动位置
+    let isRunning = false;
+    const checkScrollPosition = () => {
+      if (!isRunning) return;
+
+      const scrollTop = getScrollTop();
+      const shouldShow = scrollTop > 300;
+      setShowBackToTop(shouldShow);
+
+      requestAnimationFrame(checkScrollPosition);
+    };
+
+    // 启动持续检测
+    isRunning = true;
+    checkScrollPosition();
+
+    // 监听 body 元素的滚动事件
+    const handleScroll = () => {
+      const scrollTop = getScrollTop();
+      setShowBackToTop(scrollTop > 300);
+    };
+
+    document.body.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => {
+      unsubscribe();
+      isRunning = false; // 停止 requestAnimationFrame 循环
+
+      // 移除 body 滚动事件监听器
+      document.body.removeEventListener('scroll', handleScroll);
+    };
   }, []);
 
   useEffect(() => {
@@ -113,11 +153,13 @@ function SearchPageClient() {
     if (query) {
       setSearchQuery(query);
       fetchSearchResults(query);
+      setShowSuggestions(false);
 
       // 保存到搜索历史 (事件监听会自动更新界面)
       addSearchHistory(query);
     } else {
       setShowResults(false);
+      setShowSuggestions(false);
     }
   }, [searchParams]);
 
@@ -128,8 +170,18 @@ function SearchPageClient() {
         `/api/search?q=${encodeURIComponent(query.trim())}`
       );
       const data = await response.json();
+      let results = data.results;
+      if (
+        typeof window !== 'undefined' &&
+        !(window as any).RUNTIME_CONFIG?.DISABLE_YELLOW_FILTER
+      ) {
+        results = results.filter((result: SearchResult) => {
+          const typeName = result.type_name || '';
+          return !yellowWords.some((word: string) => typeName.includes(word));
+        });
+      }
       setSearchResults(
-        data.results.sort((a: SearchResult, b: SearchResult) => {
+        results.sort((a: SearchResult, b: SearchResult) => {
           // 优先排序：标题与搜索词完全一致的排在前面
           const aExactMatch = a.title === query.trim();
           const bExactMatch = b.title === query.trim();
@@ -163,6 +215,26 @@ function SearchPageClient() {
     }
   };
 
+  // 输入框内容变化时触发，显示搜索建议
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setSearchQuery(value);
+
+    if (value.trim()) {
+      setShowSuggestions(true);
+    } else {
+      setShowSuggestions(false);
+    }
+  };
+
+  // 搜索框聚焦时触发，显示搜索建议
+  const handleInputFocus = () => {
+    if (searchQuery.trim()) {
+      setShowSuggestions(true);
+    }
+  };
+
+  // 搜索表单提交时触发，处理搜索逻辑
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = searchQuery.trim().replace(/\s+/g, ' ');
@@ -172,6 +244,7 @@ function SearchPageClient() {
     setSearchQuery(trimmed);
     setIsLoading(true);
     setShowResults(true);
+    setShowSuggestions(false);
 
     router.push(`/search?q=${encodeURIComponent(trimmed)}`);
     // 直接发请求
@@ -179,6 +252,33 @@ function SearchPageClient() {
 
     // 保存到搜索历史 (事件监听会自动更新界面)
     addSearchHistory(trimmed);
+  };
+
+  const handleSuggestionSelect = (suggestion: string) => {
+    setSearchQuery(suggestion);
+    setShowSuggestions(false);
+
+    // 自动执行搜索
+    setIsLoading(true);
+    setShowResults(true);
+
+    router.push(`/search?q=${encodeURIComponent(suggestion)}`);
+    fetchSearchResults(suggestion);
+    addSearchHistory(suggestion);
+  };
+
+  // 返回顶部功能
+  const scrollToTop = () => {
+    try {
+      // 根据调试结果，真正的滚动容器是 document.body
+      document.body.scrollTo({
+        top: 0,
+        behavior: 'smooth',
+      });
+    } catch (error) {
+      // 如果平滑滚动完全失败，使用立即滚动
+      document.body.scrollTop = 0;
+    }
   };
 
   return (
@@ -193,9 +293,18 @@ function SearchPageClient() {
                 id='searchInput'
                 type='text'
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={handleInputChange}
+                onFocus={handleInputFocus}
                 placeholder='搜索电影、电视剧...'
                 className='w-full h-12 rounded-lg bg-gray-50/80 py-3 pl-10 pr-4 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-400 focus:bg-white border border-gray-200/50 shadow-sm dark:bg-gray-800 dark:text-gray-300 dark:placeholder-gray-500 dark:focus:bg-gray-700 dark:border-gray-700'
+              />
+
+              {/* 搜索建议 */}
+              <SearchSuggestions
+                query={searchQuery}
+                isVisible={showSuggestions}
+                onSelect={handleSuggestionSelect}
+                onClose={() => setShowSuggestions(false)}
               />
             </div>
           </form>
@@ -265,13 +374,15 @@ function SearchPageClient() {
                           episodes={item.episodes.length}
                           source={item.source}
                           source_name={item.source_name}
-                          douban_id={item.douban_id?.toString()}
+                          douban_id={item.douban_id}
                           query={
                             searchQuery.trim() !== item.title
                               ? searchQuery.trim()
                               : ''
                           }
+                          year={item.year}
                           from='search'
+                          type={item.episodes.length > 1 ? 'tv' : 'movie'}
                         />
                       </div>
                     ))}
@@ -331,6 +442,19 @@ function SearchPageClient() {
           ) : null}
         </div>
       </div>
+
+      {/* 返回顶部悬浮按钮 */}
+      <button
+        onClick={scrollToTop}
+        className={`fixed bottom-20 md:bottom-6 right-6 z-[500] w-12 h-12 bg-green-500/90 hover:bg-green-500 text-white rounded-full shadow-lg backdrop-blur-sm transition-all duration-300 ease-in-out flex items-center justify-center group ${
+          showBackToTop
+            ? 'opacity-100 translate-y-0 pointer-events-auto'
+            : 'opacity-0 translate-y-4 pointer-events-none'
+        }`}
+        aria-label='返回顶部'
+      >
+        <ChevronUp className='w-6 h-6 transition-transform group-hover:scale-110' />
+      </button>
     </PageLayout>
   );
 }

@@ -1,15 +1,29 @@
 /* eslint-disable @typescript-eslint/no-explicit-any,no-console */
-
+import he from 'he';
 import Hls from 'hls.js';
 
-/**
- * 获取图片代理 URL 设置
- */
-export function getImageProxyUrl(): string | null {
-  if (typeof window === 'undefined') return null;
-
-  const imageProxyUrl = localStorage.getItem('imageProxyUrl');
-  return imageProxyUrl && imageProxyUrl.trim() ? imageProxyUrl.trim() : null;
+function getDoubanImageProxyConfig(): {
+  proxyType:
+    | 'direct'
+    | 'server'
+    | 'img3'
+    | 'cmliussss-cdn-tencent'
+    | 'cmliussss-cdn-ali'
+    | 'custom';
+  proxyUrl: string;
+} {
+  const doubanImageProxyType =
+    localStorage.getItem('doubanImageProxyType') ||
+    (window as any).RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY_TYPE ||
+    'direct';
+  const doubanImageProxy =
+    localStorage.getItem('doubanImageProxyUrl') ||
+    (window as any).RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY ||
+    '';
+  return {
+    proxyType: doubanImageProxyType,
+    proxyUrl: doubanImageProxy,
+  };
 }
 
 /**
@@ -18,24 +32,33 @@ export function getImageProxyUrl(): string | null {
 export function processImageUrl(originalUrl: string): string {
   if (!originalUrl) return originalUrl;
 
-  const proxyUrl = getImageProxyUrl();
-  if (!proxyUrl) return originalUrl;
+  // 仅处理豆瓣图片代理
+  if (!originalUrl.includes('doubanio.com')) {
+    return originalUrl;
+  }
 
-  // 如果原始 URL 已经是代理 URL，则不再处理
-  if (originalUrl.includes(proxyUrl)) return originalUrl;
-
-  return `${proxyUrl}${encodeURIComponent(originalUrl)}`;
-}
-
-export function cleanHtmlTags(text: string): string {
-  if (!text) return '';
-  return text
-    .replace(/<[^>]+>/g, '\n') // 将 HTML 标签替换为换行
-    .replace(/\n+/g, '\n') // 将多个连续换行合并为一个
-    .replace(/[ \t]+/g, ' ') // 将多个连续空格和制表符合并为一个空格，但保留换行符
-    .replace(/^\n+|\n+$/g, '') // 去掉首尾换行
-    .replace(/&nbsp;/g, ' ') // 将 &nbsp; 替换为空格
-    .trim(); // 去掉首尾空格
+  const { proxyType, proxyUrl } = getDoubanImageProxyConfig();
+  switch (proxyType) {
+    case 'server':
+      return `/api/image-proxy?url=${encodeURIComponent(originalUrl)}`;
+    case 'img3':
+      return originalUrl.replace(/img\d+\.doubanio\.com/g, 'img3.doubanio.com');
+    case 'cmliussss-cdn-tencent':
+      return originalUrl.replace(
+        /img\d+\.doubanio\.com/g,
+        'img.doubanio.cmliussss.net'
+      );
+    case 'cmliussss-cdn-ali':
+      return originalUrl.replace(
+        /img\d+\.doubanio\.com/g,
+        'img.doubanio.cmliussss.com'
+      );
+    case 'custom':
+      return `${proxyUrl}${encodeURIComponent(originalUrl)}`;
+    case 'direct':
+    default:
+      return originalUrl;
+  }
 }
 
 /**
@@ -193,4 +216,18 @@ export async function getVideoResolutionFromM3u8(m3u8Url: string): Promise<{
       }`
     );
   }
+}
+
+export function cleanHtmlTags(text: string): string {
+  if (!text) return '';
+
+  const cleanedText = text
+    .replace(/<[^>]+>/g, '\n') // 将 HTML 标签替换为换行
+    .replace(/\n+/g, '\n') // 将多个连续换行合并为一个
+    .replace(/[ \t]+/g, ' ') // 将多个连续空格和制表符合并为一个空格，但保留换行符
+    .replace(/^\n+|\n+$/g, '') // 去掉首尾换行
+    .trim(); // 去掉首尾空格
+
+  // 使用 he 库解码 HTML 实体
+  return he.decode(cleanedText);
 }
